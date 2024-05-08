@@ -1,0 +1,83 @@
+---
+- name: Provision an EC2 instance
+  hosts: localhost
+  gather_facts: false
+  module_defaults:
+    group/aws:
+      region: us-east-1
+  vars:
+    ec2_instance:
+      instName: lightspeed-instance-01
+      key_name: lightspeed-keypair
+      image_id: ami-016eb5d644c333ccb # RHEL 9 us-east-1
+      tags:
+        function: lightspeed-demo
+      security_group: secgroup-lightspeed
+  tasks:
+  # create vpc named demo & create security group for demo vpc and allow ssh and http & create internet gateway named demogateway for demo vpc & create subnet named demosubnet in demo vpc & create route table for subnet demosubnet and gateway demogateway & create t2.small ec2 instance in subnet demosubnet
+  # Content suggestion provided by Ansible Lightspeed
+  - name: Create vpc named demo
+    amazon.aws.ec2_vpc_net:
+      name: demo
+      cidr_block: 10.0.0.80/16
+      tags:
+        Name: demo
+      tenancy: default
+    register: vpc
+
+  - name: Create security group for demo vpc and allow ssh and http
+    amazon.aws.ec2_security_group:
+      name: secgroup-lightspeed
+      description: allow ssh and http
+      vpc_id: "{{ vpc.vpc.id }}"
+      rules:
+        - proto: tcp
+          from_port: 22
+          to_port: 22
+          cidr_ip: 0.0.0.0/0
+        - proto: tcp
+          from_port: 80
+          to_port: 80
+          cidr_ip: 0.0.0.0/0
+    register: secgroup
+
+  - name: Create internet gateway named demogateway for demo vpc
+    amazon.aws.ec2_vpc_igw:
+      vpc_id: "{{ vpc.vpc.id }}"
+      tags:
+        Name: demogateway
+    register: igw
+
+  - name: Create subnet named demosubnet in demo vpc
+    amazon.aws.ec2_vpc_subnet:
+      vpc_id: "{{ vpc.vpc.id }}"
+      cidr: 10.0.0.80/24
+      az: us-east-1a
+      tags:
+        Name: demosubnet
+      state: present
+    register: subnet
+
+  - name: Create route table for subnet demosubnet and gateway demogateway
+    amazon.aws.ec2_vpc_route_table:
+      vpc_id: "{{ vpc.vpc.id }}"
+      tags:
+        Name: demosubnet
+      subnets:
+        - "{{ subnet.subnet.id }}"
+      routes:
+        - dest: 0.0.0.0/0
+          gateway_id: "{{ igw.gateway_id }}"
+    register: route_table
+
+  - name: Create t2.small ec2 instance in subnet demosubnet
+    amazon.aws.ec2_instance:
+      key_name: "{{ _key_name_ }}"
+      image_id: ami-016eb5d644c333ccb
+      vpc_subnet_id: "{{ subnet.subnet.id }}"
+      instance_type: t2.small
+      wait: true
+      tags:
+        Name: lightspeed-instance-01
+      security_group: secgroup-lightspeed
+    register: ec2

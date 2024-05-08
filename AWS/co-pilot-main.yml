@@ -1,0 +1,74 @@
+---
+- name: Create AWS resources
+  hosts: localhost
+  gather_facts: false
+  module_defaults:
+    group/aws:
+      region: us-east-1
+  vars:
+    ec2_instance:
+      instName: lightspeed-instance-01
+      key_name: lightspeed-keypair
+      image_id: ami-016eb5d644c333ccb # RHEL 9 us-east-1
+      tags:
+        function: lightspeed-demo
+      security_group: secgroup-lightspeed
+  tasks:
+  # create vpc named demo & create security group for demo vpc and allow ssh and http & create internet gateway named demogateway for demo vpc & create subnet named demosubnet in demo vpc & create route table for subnet demosubnet and gateway demogateway & create t2.small ec2 instance in subnet demosubnet
+  - name: Create VPC
+    ec2_vpc_net:
+      name: demo
+      cidr_block: 10.0.0.0/16
+      state: present
+    register: vpc_result
+
+  - name: Create Security Group
+    ec2_group:
+      name: demo-security-group
+      description: Security group for demo VPC
+      vpc_id: "{{ vpc_result.vpc.id }}"
+      rules:
+        - proto: tcp
+          ports:
+            - 22
+            - 80
+          cidr_ip: 0.0.0.0/0
+      state: present
+    register: sg_result
+
+  - name: Create Internet Gateway
+    ec2_vpc_igw:
+      vpc_id: "{{ vpc_result.vpc.id }}"
+      state: present
+    register: igw_result
+
+  - name: Create Subnet
+    ec2_vpc_subnet:
+      vpc_id: "{{ vpc_result.vpc.id }}"
+      cidr: 10.0.0.0/24
+      state: present
+    register: subnet_result
+
+  - name: Create Route Table
+    ec2_vpc_route_table:
+      vpc_id: "{{ vpc_result.vpc.id }}"
+      routes:
+        - dest: 0.0.0.0/0
+          gateway_id: "{{ igw_result.gateway.id }}"
+      subnets:
+        - "{{ subnet_result.subnet.id }}"
+      state: present
+    register: route_table_result
+
+  - name: Create EC2 Instance
+    ec2:
+      key_name: "{{ ec2_instance.key_name }}"
+      instance_type: t2.small
+      image: "{{ ec2_instance.image_id }}"
+      vpc_subnet_id: "{{ subnet_result.subnet.id }}"
+      group_id: "{{ sg_result.group_id }}"
+      instance_tags: "{{ ec2_instance.tags }}"
+      wait: true
+      count: 1
+      state: present
+    register: ec2_result
